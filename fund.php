@@ -1,8 +1,9 @@
 <?php
 session_start();
 
+// Check if the user is logged in
 if (!isset($_SESSION['userId'])) {
-    header('Location: index.php');
+    header('Location: index.php');  
     exit();
 }
 
@@ -10,6 +11,7 @@ include './database/dbconfig.php';
 
 $userId = $_SESSION['userId'];
 
+// Fetch user details
 $sql = "SELECT * FROM users WHERE id = ?";
 $stmt = $conn->prepare($sql);
 $stmt->bind_param("i", $userId); 
@@ -25,24 +27,35 @@ if ($result->num_rows > 0) {
 
 $stmt->close();
 
-$sql = "SELECT * FROM transactions WHERE id = ?";
+// Fetch API key from admin
+$sql = "SELECT apiKey FROM admin";
 $stmt = $conn->prepare($sql);
-$stmt->bind_param("i", $userId); 
 $stmt->execute();
 $result = $stmt->get_result();
 
-$transactions = [];
 if ($result->num_rows > 0) {
-    while ($row = $result->fetch_assoc()) {
-        $transactions[] = $row;
-    }
+    $apiDetails = $result->fetch_assoc();
 } else {
-   
+    $_SESSION['message'] = "No apiKey found.";
+    $_SESSION['messageType'] = "error";
 }
 
 $stmt->close();
 $conn->close();
+
+// Handle session messages
+if (isset($_SESSION['message'])) {
+  $message = $_SESSION['message'];
+  $messageType = $_SESSION['messageType'];
+
+  unset($_SESSION['message']);
+  unset($_SESSION['messageType']);
+} else {
+  $message = '';
+  $messageType = '';
+}
 ?>
+
 <!DOCTYPE html>
 
 <html
@@ -98,6 +111,7 @@ $conn->close();
      <script src="./jss/config.js"></script>
     <link rel="stylesheet" href="loader.css" />
     <link rel="stylesheet" href="style.css" />
+    <script src="https://checkout.flutterwave.com/v3.js"></script>
   <style>
     #fundbtn{
   display:flex;flex-direction: row;
@@ -316,6 +330,14 @@ form>input{
                       </a>
                     </li>
                     <li>
+                      <a class="dropdown-item" href="./dark/fund.php">
+                        <span class="d-flex align-items-center align-middle">
+                          <i class="flex-shrink-0 bx bx-layout me-2"></i>
+                          <span class="flex-grow-1 align-middle">Dark Mode</span>
+                       </span>
+                      </a>
+                    </li>
+                    <li>
                       <div class="dropdown-divider"></div>
                     </li>
                     <li>
@@ -336,7 +358,35 @@ form>input{
           <!-- Content wrapper -->
           <div class="content-wrapper" id="diva">
             <!-- Content -->
+            <div id="popupMessage" class="popup-message <?php echo $messageType == 'success' ? 'popup-success' : 'popup-error'; ?>">
+      <?php echo $message; ?><br>
+      <button id="closeButton" class="close-btn">Close</button>
+    </div>
+    <script>
+      // Check if there's a message to display
+      var message = "<?php echo $message; ?>";
+      var popupMessage = document.getElementById("popupMessage");
+      var popupOverlay = document.getElementById("popupOverlay");
+      var closeButton = document.getElementById("closeButton");
 
+      if (message) {
+        // Show the popup and overlay
+        popupOverlay.style.display = "block";
+        popupMessage.style.display = "block";
+
+        // Hide the popup automatically after 5 seconds
+        setTimeout(function() {
+          popupMessage.style.display = "none";
+          popupOverlay.style.display = "none";
+        }, 5000); // Adjust time as needed
+      }
+
+      // Close the popup when the close button is clicked
+      closeButton.addEventListener("click", function() {
+        popupMessage.style.display = "none";
+        popupOverlay.style.display = "none";
+      });
+    </script>
             <div class="container-xxl flex-grow-1 container-p-y" id="diva">
              
             
@@ -362,11 +412,76 @@ form>input{
         </div>
 
         <div id="onlineFunding" style="display: none;">
-            <form action="">
-                <label>Enter fund amount to proceed</label><br>
-                <input type="number" name="" value=""><br>
-                <button type="submit">Proceed to fund</button> 
-            </form>
+        <form method="POST">
+    <label>Enter fund amount to proceed</label><br>
+    <input type="number" id="amount" name="amount" required />
+    <br>
+    <button type="button" onclick="makePayment()">Pay Now</button>
+</form>
+
+<script>
+function makePayment() {
+  const amount = document.getElementById("amount").value;
+
+  if (!amount || amount <= 0) {
+    alert("Please enter a valid amount.");
+    return;
+  }
+
+  const txRef = "txref-" + Math.random().toString(36).substr(2, 9) + "-" + Date.now();
+
+  fetch('process_payment.php', { 
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      tx_ref: txRef,
+      amount: amount,
+      customer_email: "<?php echo htmlspecialchars($userDetails['email']); ?>",
+      customer_phone: "<?php echo htmlspecialchars($userDetails['phoneNumber']); ?>",
+    }),
+  })
+  .then(response => response.json())
+  .then(data => {
+    console.log("Payment response:", data);
+    if (data.status === 'success') {
+      FlutterwaveCheckout({
+        public_key: data.apiKey,
+        tx_ref: txRef,
+        amount: amount,
+        currency: "NGN",
+        payment_options: "card, banktransfer, ussd",
+        customer: {
+          email: "<?php echo htmlspecialchars($userDetails['email']); ?>",
+          phone_number: "<?php echo htmlspecialchars($userDetails['phoneNumber']); ?>",
+          name: "<?php echo htmlspecialchars($userDetails['fullname']); ?>",
+        },
+        callback: function(data) {
+          if (data.status === "success" || data.status === 'completed') {
+            const userId = "<?php echo htmlspecialchars($userDetails['id']); ?>";
+            const fundAmount = document.getElementById("amount").value;
+            window.location.href = `pay.php?user_id=${userId}&amount=${fundAmount}`;
+          } else {
+            alert("Payment was not successful. Please try again.");
+          }
+        },
+        onclose: function() {
+          alert("Payment cancelled!");
+        }
+      });
+    } else {
+      alert("Payment initialization failed.");
+    }
+  })
+  .catch(err => {
+    console.error("Error:", err);
+    alert("An error occurred. Please try again.");
+  });
+}
+
+</script>
+
         </div>
     </div>
 </div>
@@ -449,6 +564,18 @@ function showDiv(divId, button) {
 
     <!-- Place this tag in your head or just before your close body tag. -->
     <script async defer src="https://buttons.github.io/buttons.js"></script>
-    <script src="script.js"></script>
+      <script src="script.js"></script>
+    <!--Start of Tawk.to Script-->
+<script type="text/javascript">
+var Tawk_API=Tawk_API||{}, Tawk_LoadStart=new Date();
+(function(){
+var s1=document.createElement("script"),s0=document.getElementsByTagName("script")[0];
+s1.async=true;
+s1.src='https://embed.tawk.to/673b39204304e3196ae478c6/1icvlea1t';
+s1.charset='UTF-8';
+s1.setAttribute('crossorigin','*');
+s0.parentNode.insertBefore(s1,s0);
+})();
+</script>
   </body>
 </html>

@@ -29,6 +29,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
     // Capture the existing values
     $existingFullname = $userDetails['fullname'];
+    $existingUsername = $userDetails['username'];
     $existingPhoneNumber = $userDetails['phoneNumber'];
     $existingAddress = $userDetails['address'];
     $existingState = $userDetails['state'];
@@ -41,6 +42,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $paramTypes = "";
 
     // Check and prepare fields to update
+    if (!empty($_POST['username']) && $_POST['username'] !== $existingUsername) {
+      $updateFields[] = "username = ?";
+      $params[] = $_POST['username'];
+      $paramTypes .= "s";
+  }
     if (!empty($_POST['fullname']) && $_POST['fullname'] !== $existingFullname) {
         $updateFields[] = "fullname = ?";
         $params[] = $_POST['fullname'];
@@ -131,7 +137,7 @@ if (isset($_SESSION['message'])) {
       content="width=device-width, initial-scale=1.0, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0"
     />
 
-    <title>Account settings - Account | Sneat - Bootstrap 5 HTML Admin Template - Pro</title>
+    <title>Account settings </title>
 
     <meta name="description" content="" />
 
@@ -417,6 +423,14 @@ if (isset($_SESSION['message'])) {
                       </a>
                     </li>
                     <li>
+                      <a class="dropdown-item" href="./dark/pages-account-settings-account.php">
+                        <span class="d-flex align-items-center align-middle">
+                          <i class="flex-shrink-0 bx bx-layout me-2"></i>
+                          <span class="flex-grow-1 align-middle">Dark Mode</span>
+                       </span>
+                      </a>
+                    </li>
+                    <li>
                       <div class="dropdown-divider"></div>
                     </li>
                     <li>
@@ -493,6 +507,18 @@ if (isset($_SESSION['message'])) {
                     <hr class="my-0" />
                     <div class="card-body" id="diva">
                       <form id="formAccountSettings" method="POST" action="" onsubmit="showLoader()">
+                      <div class="row">
+                          <div class="mb-3 col-md-6">
+                            <label for="username" class="form-label">Username</label>
+                            <input
+                              class="form-control"
+                              type="text"
+                              id="username"
+                              name="username"
+                              value="<?= htmlspecialchars($userDetails['username'] ?? '', ENT_QUOTES); ?>"
+                              autofocus
+                            />
+                          </div>
                         <div class="row">
                           <div class="mb-3 col-md-6">
                             <label for="firstName" class="form-label">Full Name</label>
@@ -747,6 +773,18 @@ if (isset($_SESSION['message'])) {
 
     <!-- Place this tag in your head or just before your close body tag. -->
     <script async defer src="https://buttons.github.io/buttons.js"></script>
-    <script src="script.js"></script>
+      <script src="script.js"></script>
+    <!--Start of Tawk.to Script-->
+<script type="text/javascript">
+var Tawk_API=Tawk_API||{}, Tawk_LoadStart=new Date();
+(function(){
+var s1=document.createElement("script"),s0=document.getElementsByTagName("script")[0];
+s1.async=true;
+s1.src='https://embed.tawk.to/673b39204304e3196ae478c6/1icvlea1t';
+s1.charset='UTF-8';
+s1.setAttribute('crossorigin','*');
+s0.parentNode.insertBefore(s1,s0);
+})();
+</script>
   </body>
 </html>

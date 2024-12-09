@@ -327,6 +327,14 @@ $conn->close();
                       </a>
                     </li>
                     <li>
+                      <a class="dropdown-item" href="./dark/referal.php">
+                        <span class="d-flex align-items-center align-middle">
+                          <i class="flex-shrink-0 bx bx-layout me-2"></i>
+                          <span class="flex-grow-1 align-middle">Dark Mode</span>
+                       </span>
+                      </a>
+                    </li>
+                    <li>
                       <div class="dropdown-divider"></div>
                     </li>
                     <li>
@@ -416,10 +424,10 @@ $conn->close();
                 <div class="card">
                   <div class="card-body">
                   <div class="card-title">
-    <p>Referral Code</p>
+    <p>Referral Link</p>
     <form action="">
         <!-- Display referral code in a read-only input field -->
-        <input type="text" id="referralCode" value="<?php echo htmlspecialchars($userDetails['refCode']); ?>" style="width: 200px; border-radius: 5px; border: 1px solid rgb(197, 192, 192); padding: 7px;" readonly>
+        <input type="text" id="referralCode" value="<?php echo htmlspecialchars($userDetails['referralLink']); ?>" style="width: 200px; border-radius: 5px; border: 1px solid rgb(197, 192, 192); padding: 7px;" readonly>
         
         <!-- Copy Button -->
         <button type="button" onclick="copyReferralCode()" class="btn btn-dark">Copy</button>
@@ -550,6 +558,18 @@ $conn->close();
 
     <!-- Place this tag in your head or just before your close body tag. -->
     <script async defer src="https://buttons.github.io/buttons.js"></script>
-    <script src="script.js"></script>
+      <script src="script.js"></script>
+    <!--Start of Tawk.to Script-->
+<script type="text/javascript">
+var Tawk_API=Tawk_API||{}, Tawk_LoadStart=new Date();
+(function(){
+var s1=document.createElement("script"),s0=document.getElementsByTagName("script")[0];
+s1.async=true;
+s1.src='https://embed.tawk.to/673b39204304e3196ae478c6/1icvlea1t';
+s1.charset='UTF-8';
+s1.setAttribute('crossorigin','*');
+s0.parentNode.insertBefore(s1,s0);
+})();
+</script>
   </body>
 </html>

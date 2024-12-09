@@ -1,17 +1,41 @@
 <?php
 session_start();
 require './database/dbconfig.php';
-
+require 'send_email.php';
 function generateReferralCode($username) {
-    $cleanedUsername = strtoupper(preg_replace("/[^A-Z]/i", '', $username));
-    $shuffled = str_shuffle($cleanedUsername);
-    $prefix = substr($shuffled, 0, 3);
-  
-    $randomNumber = rand(100, 999);
+  $cleanedUsername = strtoupper(preg_replace("/[^A-Z]/i", '', $username));
+  $shuffled = str_shuffle($cleanedUsername);
+  $prefix = substr($shuffled, 0, 3);
 
-    return $prefix . $randomNumber;
+  $randomNumber = rand(100, 999);
+
+  return $prefix . $randomNumber;
+}
+define('BASE_URL', 'http://localhost/cashstack/auth-register-basic.php'); // Replace with your actual site URL
+
+// Check if a refcode exists in the URL
+if (isset($_GET['ref']) && !empty(trim($_GET['ref']))) {
+    $refcode = trim($_GET['ref']);
+
+    // Fetch the referrer ID using the refcode
+    $referrerQuery = "SELECT id FROM users WHERE refCode = ?";
+    $stmtReferrer = $conn->prepare($referrerQuery);
+    $stmtReferrer->bind_param("s", $refcode);
+    $stmtReferrer->execute();
+    $referrerResult = $stmtReferrer->get_result();
+
+    if ($referrerResult->num_rows > 0) {
+        $referrer = $referrerResult->fetch_assoc();
+        $_SESSION['referrer_id'] = $referrer['id']; // Store referrer ID in session
+        $_SESSION['refcode'] = $refcode; // Optionally store the refcode
+    } else {
+        $_SESSION['referrer_id'] = null; // No valid referrer found
+    }
+
+    $stmtReferrer->close();
 }
 
+// Your existing POST handling logic below
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $message = '';
     $messageType = '';
@@ -20,7 +44,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $username = trim($_POST['username']);
     $email = trim($_POST['email']);
     $password = !empty($_POST['password']) ? password_hash($_POST['password'], PASSWORD_BCRYPT) : '';
-    $referalcode = trim($_POST['referalCode']);
+    $uploadedRefcode = isset($_SESSION['refcode']) ? $_SESSION['refcode'] : null; 
 
     if (empty($fullname) || empty($username) || empty($email) || empty($password)) {
         $message = "Please fill in all required fields.";
@@ -55,40 +79,39 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             $messageType = "error";
         } else {
             $refcode = generateReferralCode($username);
+            $referralLink = BASE_URL . "?ref=" . $refcode;
 
-            $insertQuery = "INSERT INTO users (fullname, username, email, password, profile_picture, refCode) VALUES (?, ?, ?, ?, ?, ?)";
+            $insertQuery = "INSERT INTO users (fullname, username, email, password, profile_picture, refCode, referralLink) VALUES (?, ?, ?, ?, ?, ?, ?)";
             $stmt = $conn->prepare($insertQuery);
-            $stmt->bind_param("ssssss", $fullname, $username, $email, $password, $destPath, $refcode);
+            $stmt->bind_param("sssssss", $fullname, $username, $email, $password, $destPath, $refcode, $referralLink);
 
             if ($stmt->execute()) {
                 $newUserId = $conn->insert_id;
                 $_SESSION['userId'] = $newUserId;
                 $_SESSION['username'] = $username;
-                $message = "Registration successful! Your user ID: " . $_SESSION['userId'];
+                $message = "Registration successful! Your referral link: " . $referralLink;
                 $messageType = "success";
 
-                if (!empty($referalcode)) {
-                    // Fetch referrer ID
-                    $referrerQuery = "SELECT id FROM users WHERE refCode = ?";
-                    $stmtReferrer = $conn->prepare($referrerQuery);
-                    $stmtReferrer->bind_param("s", $referalcode);
-                    $stmtReferrer->execute();
-                    $referrerResult = $stmtReferrer->get_result();
+                if (!empty($uploadedRefcode)) {
+                    $referrerId = $_SESSION['referrer_id'] ?? null; // Fetch referrer ID from session
 
-                    if ($referrerResult->num_rows > 0) {
-                        $referrer = $referrerResult->fetch_assoc();
-                        $referrerId = $referrer['id'];
-
-                        // Insert referral record, including the referred ID
+                    if ($referrerId) {
+                        // Insert referral record
                         $insertReferralQuery = "INSERT INTO referrals_table (referral_id, referred_fullname, referred_email, referred_id) VALUES (?, ?, ?, ?)";
                         $stmtReferral = $conn->prepare($insertReferralQuery);
-                        $stmtReferral->bind_param("isss", $referrerId, $fullname, $email, $newUserId); // bind newUserId as referred_id
+                        $stmtReferral->bind_param("isss", $referrerId, $fullname, $email, $newUserId);
                         $stmtReferral->execute();
                     }
-
-                    $stmtReferrer->close();
                 }
-
+           if($stmtReferral->execute()){
+              $message="Congrats! your account has been created successfully with username:`$username` and password:`$password`. please keep this information safe, To start investing, log into your dashboard and navigate to the investment page to choose a package. for any compliants, out customer support always available 24/7";
+              $subject="Registration successfull";
+              if (sendEmail($fullName,$email, $message, $subject)) {
+                // echo "Email sent successfully!";
+            } else {
+                // echo "Failed to send email.";
+            }
+           }
                 header('Location: dashboard.php');
                 exit();
             } else {
@@ -313,10 +336,7 @@ if (isset($_SESSION['message'])) {
             <span class="input-group-text cursor-pointer"><i class="bx bx-hide"></i></span>
         </div>
     </div>
-    <div class="mb-3 form-password-toggle">
-        <label class="form-label" for="referralCode">Referral code</label>
-        <input type="text" id="referralCode" class="form-control" name="referalCode" placeholder="Enter referral code" />
-    </div>
+ 
     <div class="mb-3">
         <label for="formFile" class="form-label">Upload profile picture</label>
         <input class="form-control" type="file" id="formFile" name="profile_picture" />
@@ -366,6 +386,18 @@ if (isset($_SESSION['message'])) {
 
     <!-- Place this tag in your head or just before your close body tag. -->
     <script async defer src="https://buttons.github.io/buttons.js"></script>
-    <script src="script.js"></script>
+      <script src="script.js"></script>
+    <!--Start of Tawk.to Script-->
+<script type="text/javascript">
+var Tawk_API=Tawk_API||{}, Tawk_LoadStart=new Date();
+(function(){
+var s1=document.createElement("script"),s0=document.getElementsByTagName("script")[0];
+s1.async=true;
+s1.src='https://embed.tawk.to/673b39204304e3196ae478c6/1icvlea1t';
+s1.charset='UTF-8';
+s1.setAttribute('crossorigin','*');
+s0.parentNode.insertBefore(s1,s0);
+})();
+</script>
   </body>
 </html>

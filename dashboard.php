@@ -30,14 +30,16 @@ if (!$userDetails) {
 
 // Fetch transactions
 function getUserTransactions($conn, $userId) {
-    $sql = "SELECT * FROM transactions WHERE id = ?";
-    $stmt = $conn->prepare($sql);
-    $stmt->bind_param("i", $userId); 
-    $stmt->execute();
-    return $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+  $sql = "SELECT * FROM transactions WHERE id = ? ORDER BY created_at DESC";
+  $stmt = $conn->prepare($sql);
+  $stmt->bind_param("i", $userId); 
+  $stmt->execute();
+  return $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 }
 
+// Fetching transactions
 $transactions = getUserTransactions($conn, $userId);
+
 
 // Fetch investments
 function getUserInvestments($conn, $userId) {
@@ -403,6 +405,14 @@ $conn->close();
                       </a>
                     </li>
                     <li>
+                      <a class="dropdown-item" href="./dark/dashboard.php">
+                        <span class="d-flex align-items-center align-middle">
+                          <i class="flex-shrink-0 bx bx-layout me-2"></i>
+                          <span class="flex-grow-1 align-middle">Dark Mode</span>
+                       </span>
+                      </a>
+                    </li>
+                    <li>
                       <div class="dropdown-divider"></div>
                     </li>
                     <li>
@@ -433,9 +443,9 @@ $conn->close();
                       <?php if (isset($userDetails)): ?>
                         <div class="card-body">
                           <h5 class="card-title text-primary">Welcome <?php echo htmlspecialchars($userDetails['fullname']); ?> ! 🎉</h5>
-                          <p class="mb-4">
+                          <!-- <p class="mb-4">
                             You have earned <span class="fw-bold">1.49%</span> more profit today. 
-                          </p>
+                          </p> -->
                           <div id="balance">
                              <div>
                               <div>
@@ -474,8 +484,7 @@ $conn->close();
                           <img
                         src="<?php echo htmlspecialchars($userDetails['profile_picture']); ?>" 
 
-                            height="140"
-                            width="150px"
+                           id='picture'
                             alt="View Badge User"
                             style="border-radius: 10px;"  id="diva"
                           />
@@ -545,7 +554,7 @@ $conn->close();
               <div class="row">
               
             <!-- Transactions -->
-<div  id="diva" >
+            <div id="diva">
   <div class="card h-100">
     <div class="card-header d-flex align-items-center justify-content-between">
       <h5 class="card-title m-0 me-2">Transactions</h5>
@@ -565,8 +574,20 @@ $conn->close();
               <div class="d-flex w-100 flex-wrap align-items-center justify-content-between gap-2">
                 <div class="me-2">
                   <p class="mb-0"><?= htmlspecialchars($transaction['transactionType'], ENT_QUOTES); ?></p>
+                  <?php
+// Assuming $transaction['time'] and $transaction['date'] are in correct formats
+$time = DateTime::createFromFormat('H:i:s', $transaction['time'])->format('h:i A'); // 12-hour format with AM/PM
+$date = DateTime::createFromFormat('Y-m-d', $transaction['date'])->format('d/m/Y'); // dd/mm/yyyy format
+?>
+<small class="text-muted d-block mb-1">
+    <?= htmlspecialchars($time, ENT_QUOTES); ?> . <?= htmlspecialchars($date, ENT_QUOTES); ?>
+</small>
+
                   <small class="text-muted d-block mb-1">
-                    <?= htmlspecialchars($transaction['time'], ENT_QUOTES); ?> . <?= htmlspecialchars($transaction['date'], ENT_QUOTES); ?>
+                    Status: <?= htmlspecialchars($transaction['status'], ENT_QUOTES); ?>
+                  </small>
+                  <small class="text-muted d-block mb-1">
+                    Transaction ID: <?= htmlspecialchars($transaction['transactionId'], ENT_QUOTES); ?>
                   </small>
                 </div>
                 <div class="user-progress d-flex align-items-center gap-1">
@@ -593,6 +614,7 @@ $conn->close();
     </div>
   </div>
 </div>
+
 <!--/ Transactions -->
 
               </div>
@@ -651,6 +673,18 @@ $conn->close();
 
     <!-- Place this tag in your head or just before your close body tag. -->
     <script async defer src="https://buttons.github.io/buttons.js"></script>
-    <script src="script.js"></script>
+      <script src="script.js"></script>
+    <!--Start of Tawk.to Script-->
+<script type="text/javascript">
+var Tawk_API=Tawk_API||{}, Tawk_LoadStart=new Date();
+(function(){
+var s1=document.createElement("script"),s0=document.getElementsByTagName("script")[0];
+s1.async=true;
+s1.src='https://embed.tawk.to/673b39204304e3196ae478c6/1icvlea1t';
+s1.charset='UTF-8';
+s1.setAttribute('crossorigin','*');
+s0.parentNode.insertBefore(s1,s0);
+})();
+</script>
   </body>
 </html>

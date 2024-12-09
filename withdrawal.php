@@ -8,7 +8,8 @@ if (!isset($_SESSION['userId'])) {
 }
 
 include './database/dbconfig.php'; 
-
+require 'send_email.php';
+// Check if form is submitted
 $userId = $_SESSION['userId'];
 
 // Fetch user details
@@ -20,13 +21,16 @@ $result = $stmt->get_result();
 
 if ($result->num_rows > 0) {
     $userDetails = $result->fetch_assoc();
+    $fullName = $userDetails['fullname'];
+    $email = $userDetails['email'];
 } else {
     echo "No user found.";
-    exit(); // Terminate script if user not found
+    exit(); 
 }
 
-// Fetch subscription details
-$sql = "SELECT subscription_date, last_withdrawal_date, referral_count FROM users WHERE id = ?";
+$reason = "";
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+  $sql = "SELECT subscription_date, last_withdrawal_date, available_withdrawal FROM users WHERE id = ?";
 $stmt = $conn->prepare($sql);
 $stmt->bind_param("i", $userId);
 $stmt->execute();
@@ -35,61 +39,118 @@ $stmt->close();
 
 // Prepare date objects
 $today = new DateTime();
-$subscriptionDate = new DateTime($user['subscription_date']); // Ensure this is formatted as YYYY-MM-DD
-$lastWithdrawalDate = isset($user['last_withdrawal_date']) ? new DateTime($user['last_withdrawal_date']) : null;
-$referralCount = $user['referral_count'];
-
+$subscriptionDate = new DateTime($user['subscription_date']);
+$lastWithdrawalDate = !empty($user['last_withdrawal_date']) ? new DateTime($user['last_withdrawal_date']) : null;
+$availableWithdrawal = $user['available_withdrawal'];
 // Define one week interval
 $oneWeekInterval = new DateInterval('P1W');
 
-// Check if user is eligible for withdrawal
+// Determine eligibility for withdrawal
 $canWithdraw = false;
 $reason = "";
 
-if (!$lastWithdrawalDate) {
-    // Check eligibility for first withdrawal
-    // The first withdrawal is allowed one week after subscription
-    $firstWithdrawalDate = clone $subscriptionDate; // Clone to avoid modifying the original date
-    $firstWithdrawalDate->add($oneWeekInterval); // Add one week
+// First withdrawal logic
+$firstWithdrawalDate = clone $subscriptionDate;
+$firstWithdrawalDate->add($oneWeekInterval);
 
+if (!$lastWithdrawalDate) {
+    // First withdrawal
     if ($today >= $firstWithdrawalDate) {
         $canWithdraw = true;
     } else {
         $reason = "You can make your first withdrawal one week after investing.";
     }
 } else {
-    // Check eligibility for subsequent withdrawals
-    $eligibleDate = clone $lastWithdrawalDate; // Clone to avoid modifying the last withdrawal date
-    $eligibleDate->add($oneWeekInterval); // Add one week for the next eligible withdrawal
-
-    if ($today >= $eligibleDate && $referralCount > 0) {
-        $canWithdraw = true;
-    } else if ($today < $eligibleDate) {
-        $reason = "You need to wait at least one week since your last withdrawal.";
-    } else if ($referralCount == 0) {
-        $reason = "You need to make a referral before you can withdraw.";
-    }
+    // Determine the next eligible withdrawal date
+    $nextEligibleDate = clone $lastWithdrawalDate;
+    $nextEligibleDate->add($oneWeekInterval);
+    if ($today >= $nextEligibleDate) {
+      if ($lastWithdrawalDate == $firstWithdrawalDate) {
+          // Fetch the user's package
+          $sql = "SELECT package FROM investment WHERE id = ?";
+          $stmt = $conn->prepare($sql);
+          $stmt->bind_param("i", $userId);
+          $stmt->execute();
+          $user = $stmt->get_result()->fetch_assoc();
+          $stmt->close();
+  
+          $userPackage = $user['package'];
+  
+          // Check referrals with the same package
+          $referralSql = "
+              SELECT COUNT(*) AS referral_count 
+              FROM referrals_table 
+              WHERE referral_id = ? AND package = ?
+          ";
+          $stmt = $conn->prepare($referralSql);
+          $stmt->bind_param("is", $userId, $userPackage);
+          $stmt->execute();
+          $referralResult = $stmt->get_result()->fetch_assoc();
+          $stmt->close();
+  
+          if ($referralResult['referral_count'] > 0) {
+              $canWithdraw = true;
+          } else {
+              $reason = "You need to refer at least one person with the same package as you to make the second withdrawal.";
+          }
+      } else {
+          // Subsequent withdrawals
+          $canWithdraw = true;
+      }
+  } else {
+      $reason = "You need to wait at least one week since your last withdrawal.";
+  }
+  
 }
 
-// If user can withdraw, process withdrawal
-if ($canWithdraw) {
-    // Withdrawal processing logic here
-    // (e.g., update balance, transfer funds, etc.)
 
-    // Update last_withdrawal_date and reset referral count
-    $sql = "UPDATE users SET last_withdrawal_date = NOW(), referral_count = 0 WHERE id = ?";
-    $stmt = $conn->prepare($sql);
-    $stmt->bind_param("i", $userId);
-    $stmt->execute();
-    $stmt->close();
+  
+    if ($canWithdraw) {
+      // Sanitize form inputs 
+      $accountName = filter_input(INPUT_POST, 'accountName', FILTER_SANITIZE_STRING);
+      $bankName = filter_input(INPUT_POST, 'bankName', FILTER_SANITIZE_STRING);
+      $accountNumber = filter_input(INPUT_POST, 'accountNumber', FILTER_SANITIZE_STRING);
+      $amount = filter_input(INPUT_POST, 'amount', FILTER_SANITIZE_NUMBER_FLOAT, FILTER_FLAG_ALLOW_FRACTION);
 
-    echo "Withdrawal successful!";
-} else {
-    // echo $reason;
+      if ($accountName && $bankName && $accountNumber && $amount) {
+          if ($amount > $availableWithdrawal) {
+              $reason = "You cannot withdraw an amount greater than your available withdrawal of $availableWithdrawal.";
+          } else {
+              $sql = "INSERT INTO transactions (id, account_name, bank_name, account_number, amount, transactionType, status, date, time) 
+                      VALUES (?, ?, ?, ?, ?, 'withdrawal', 'pending', CURDATE(), CURTIME())";
+              $stmt = $conn->prepare($sql);
+              $stmt->bind_param("issss", $userId, $accountName, $bankName, $accountNumber, $amount);
+
+              if ($stmt->execute()) {
+                  // Update last withdrawal date
+                  $updateSql = "UPDATE users SET last_withdrawal_date = CURRENT_DATE WHERE id = ?";
+                  $updateStmt = $conn->prepare($updateSql);
+                  $updateStmt->bind_param("i", $userId);
+                  $updateStmt->execute();
+                  $updateStmt->close();
+
+                  $reason = "Withdrawal request submitted successfully";
+                  $message = "Your withdrawal request has been submitted successfully. You will receive your earning upon confirmation";
+                  $subject ="Withdrawal request submitted successfully";
+                  if (sendEmail($fullName,$email, $message, $subject)) {
+                   // echo "Email sent successfully!";
+               } else {
+                   // echo "Failed to send email.";
+               }
+              } else {
+                  $reason = "Error processing withdrawal. Please try again.";
+              }
+              $stmt->close();
+          }
+      } else {
+          $reason = "Invalid account details. Please fill out all fields correctly.";
+      }
+  }
 }
 
 $conn->close();
 ?>
+
 
 <!DOCTYPE html>
 
@@ -345,6 +406,14 @@ $conn->close();
                       </a>
                     </li>
                     <li>
+                      <a class="dropdown-item" href="./dark/withdrawal.php">
+                        <span class="d-flex align-items-center align-middle">
+                          <i class="flex-shrink-0 bx bx-layout me-2"></i>
+                          <span class="flex-grow-1 align-middle">Dark Mode</span>
+                       </span>
+                      </a>
+                    </li>
+                    <li>
                       <div class="dropdown-divider"></div>
                     </li>
                     <li>
@@ -404,68 +473,148 @@ $conn->close();
                             <h5 class="mb-0">Enter account details to withdraw</h5>
                           </div>
                           <div class="card-body">
-                            <form>
-                              <div class="row mb-3">
-                                <label class="col-sm-2 col-form-label" for="basic-icon-default-fullname">Account Name</label>
-                                <div class="col-sm-10">
-                                  <div class="input-group input-group-merge">
-                                    <span id="basic-icon-default-fullname2" class="input-group-text"
-                                      ><i class="bx bx-user"></i
-                                    ></span>
-                                    <input
-                                      type="text"
-                                      class="form-control"
-                                      id="basic-icon-default-fullname"
-                                      placeholder="Enter bank name"
-                                      aria-label="John Doe"
-                                      aria-describedby="basic-icon-default-fullname2"
-                                    />
-                                  </div>
-                                </div>
-                              </div>
-                              <div class="row mb-3">
-                                <label class="col-sm-2 col-form-label" for="basic-icon-default-company">Bank Name</label>
-                                <div class="col-sm-10">
-                                  <div class="input-group input-group-merge">
-                                    <span id="basic-icon-default-company2" class="input-group-text"
-                                      ><i class="bx bx-buildings"></i
-                                    ></span>
-                                    <input
-                                      type="text"
-                                      id="basic-icon-default-company"
-                                      class="form-control"
-                                      placeholder="ACME Inc."
-                                      aria-label="ACME Inc."
-                                      aria-describedby="basic-icon-default-company2"
-                                    />
-                                  </div>
-                                </div>
-                              </div>
-                              <div class="row mb-3">
-                                <label class="col-sm-2 col-form-label" for="basic-icon-default-email">Account Number</label>
-                                <div class="col-sm-10">
-                                  <div class="input-group input-group-merge">
-                                    <span class="input-group-text"><i class="bx bx-buildings"></i
-                                        ></span>
-                                    <input
-                                      type="number"
-                                      id="basic-icon-default-email"
-                                      class="form-control"
-                                      placeholder="john.doe"
-                                      aria-label="john.doe"
-                                      aria-describedby="basic-icon-default-email2"
-                                    />
-                                  </div>
-                                </div>
-                              </div>
-                        
-                             
-                              <div class="row justify-content-end">
-                                <div class="col-sm-10">
-                                  <button type="submit" class="btn btn-primary">Withdraw</button>
-                                </div>
-                              </div>
-                            </form>
+                          <form id="accountLookupForm" method="post" action="">
+    <div class="row mb-3">
+        <label class="col-sm-2 col-form-label" for="bank">Bank Name</label>
+        <div class="col-sm-10">
+            <div class="input-group input-group-merge">
+                <span id="basic-icon-default-company2" class="input-group-text">
+                    <i class="bx bx-buildings"></i>
+                </span>
+                <select name="bankName" id="bank" class="form-select" onchange="setBankCode(this)">
+                    <option value="">Loading banks...</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <div class="row mb-3">
+        <label class="col-sm-2 col-form-label" for="accountNumber">Account Number</label>
+        <div class="col-sm-10">
+            <div class="input-group input-group-merge">
+                <span class="input-group-text"><i class="bx bx-buildings"></i></span>
+                <input type="text" name="accountNumber" id="accountNumber" class="form-control" required>
+            </div>
+        </div>
+    </div>
+
+    <div class="row mb-3">
+        <label class="col-sm-2 col-form-label" for="accountName">Account Name</label>
+        <div class="col-sm-10">
+            <div class="input-group input-group-merge">
+                <span id="basic-icon-default-fullname2" class="input-group-text">
+                    <i class="bx bx-user"></i>
+                </span>
+                <input type="text" name="accountName" id="accountName" class="form-control" required readonly>
+            </div>
+        </div>
+    </div>
+    <div class="row mb-3">
+        <label class="col-sm-2 col-form-label" for="Amount">Amount</label>
+        <div class="col-sm-10">
+            <div class="input-group input-group-merge">
+                <span class="input-group-text"><i class="bx bx-buildings"></i></span>
+                <input type="text" name="amount" id="amount" class="form-control" required>
+            </div>
+        </div>
+    </div>
+    <div class="row justify-content-end">
+        <div class="col-sm-10">
+            <button type="submit" class="btn btn-primary">Withdraw</button>
+        </div>
+    </div>
+</form>
+
+<script>
+    let bankCode = ''; // To store the selected bank code
+
+    // Function to handle setting the bank code when a bank is selected
+    function setBankCode(select) {
+        bankCode = select.value;
+    }
+
+    // Function to fetch and populate the bank dropdown
+    async function fetchBanks() {
+        const bankSelect = document.getElementById('bank');
+        bankSelect.innerHTML = '<option value="">Loading banks...</option>'; // Show loading message
+
+        try {
+            const response = await fetch('fetchBanks.php'); // Call PHP script to fetch bank list
+            const data = await response.json();
+
+            if (data.error) {
+                // Display error if present
+                bankSelect.innerHTML = `<option value="">Error: ${data.error}</option>`;
+            } else if (data.data && Array.isArray(data.data)) {
+                // Populate dropdown with bank options
+                bankSelect.innerHTML = '<option value="">Select a Bank</option>';
+                data.data.forEach(bank => {
+                    const option = document.createElement('option');
+                    option.value = bank.code;
+                    option.textContent = bank.name;
+                    bankSelect.appendChild(option);
+                });
+            } else {
+                // Handle unexpected data structure
+                bankSelect.innerHTML = '<option value="">Error: No banks found</option>';
+            }
+        } catch (error) {
+            // Handle network or other errors
+            bankSelect.innerHTML = `<option value="">Error: ${error.message}</option>`;
+            console.error('Fetch error:', error);
+        }
+    }
+
+    // Function to handle the account lookup when account number loses focus
+    const handleAccountLookup = async () => {
+        const accountNumber = document.getElementById('accountNumber').value;
+
+        if (!accountNumber || !bankCode) {
+            alert('Please select a bank and enter an account number.');
+            return;
+        }
+
+        try {
+            const response = await fetch('resolveAccount.php', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    account_number: accountNumber,
+                    bank_code: bankCode,
+                }),
+            });
+
+            const data = await response.json();
+
+            if (data.error) {
+                alert(data.error);
+                document.getElementById('accountName').value = ''; // Clear on error
+            } else if (data.data && data.data.account_name) {
+                document.getElementById('accountName').value = data.data.account_name; // Display account name
+            } else {
+                alert('Failed to resolve account name. Please check your details.');
+                document.getElementById('accountName').value = '';
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            alert('An unexpected error occurred during account lookup.');
+            document.getElementById('accountName').value = '';
+        }
+    };
+
+    // Attach an event listener to trigger lookup when the account number input loses focus
+    document.getElementById('accountNumber').addEventListener('blur', handleAccountLookup);
+
+    // Fetch and populate the bank list when the page loads
+    document.addEventListener('DOMContentLoaded', fetchBanks);
+</script>
+
+
+
+
+
                           </div>
                         </div>
                       </div>
@@ -474,8 +623,8 @@ $conn->close();
               </div>
             </div>
             <!-- / Content -->
-
-            <!-- Footer -->
+       
+        <!-- Footer -->
             <footer class="content-footer footer bg-footer-theme" id="diva">
               <div class="container-xxl d-flex flex-wrap justify-content-between py-2 flex-md-row flex-column" id="diva">
                 <div class="mb-2 mb-md-0" id="diva">
@@ -528,5 +677,18 @@ $conn->close();
     <!-- Place this tag in your head or just before your close body tag. -->
     <script async defer src="https://buttons.github.io/buttons.js"></script>
     <script src="script.js"></script>
+    <!--Start of Tawk.to Script-->
+<script type="text/javascript">
+var Tawk_API=Tawk_API||{}, Tawk_LoadStart=new Date();
+(function(){
+var s1=document.createElement("script"),s0=document.getElementsByTagName("script")[0];
+s1.async=true;
+s1.src='https://embed.tawk.to/673b39204304e3196ae478c6/1icvlea1t';
+s1.charset='UTF-8';
+s1.setAttribute('crossorigin','*');
+s0.parentNode.insertBefore(s1,s0);
+})();
+</script>
+<!--End of Tawk.to Script-->
   </body>
 </html>
